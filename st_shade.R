@@ -21,6 +21,10 @@ st_rotate = function(x, theta){
 # extends a linestring by dist in both directions
 st_extend_line <- function(x, dist) {
     
+    if (st_is_longlat(x)) {
+        stop("x cannot be longlat")
+    }
+    
     if (inherits(x, "sf")) {
         x <- split.data.frame(x, 1:nrow(x))
         f <- "rbind"
@@ -30,11 +34,7 @@ st_extend_line <- function(x, dist) {
     } else {
         stop("x must be a sf or sfc object")
     }
-    
-    if (st_is_longlat(x[[1]])) {
-        stop("x cannot be longlat")
-    }
-    
+
     lapply(x, function(x) {
         pts <- st_coordinates(x)[, 1:2]
         i <- c(2, nrow(pts) - 1)
@@ -64,39 +64,42 @@ st_extend_line <- function(x, dist) {
 st_shade <- function(x, angle, density) {
     
     if (inherits(x, "sf")) {
-        if (length(angle) == 1) angle <- rep(angle, nrow(x))
-        if (length(density) == 1) density <- rep(density, nrow(x))
-        if (length(angle) != nrow(x)) stop("angle must be length 1 or ", nrow(x))
-        if (length(density) != nrow(x)) stop("density must be length 1 or ", nrow(x))
-    } else {
-        stop("x must be an sf object")
+        x <- st_geometry(x)
     }
     
+    if (inherits(x, "sfc")) {
+        if (length(angle) == 1) angle <- rep(angle, length(x))
+        if (length(density) == 1) density <- rep(density, length(x))
+        if (length(angle) != length(x)) stop("angle must be length 1 or ", length(x))
+        if (length(density) != length(x)) stop("density must be length 1 or ", length(x))
+    } else {
+        stop("x must be an sfc object")
+    }
+
     gbb <- st_bbox(x)
     cellsize <- max(gbb[3]-gbb[1], gbb[4]-gbb[2]) / density
     
-    lapply(1:nrow(x), function(i) {
-        x <- x[i,]
+    lapply(1:length(x), function(i) {
+        z <- x[i]
         density <- density[i]
         angle <- angle[i]
-        bb <- st_bbox(x)
+        bb <- st_bbox(z)
         buf_size <- 0.50 * max(bb[3]-bb[1], bb[4]-bb[2])
-        bb_pol <- st_as_sfc(bb)
-        bb_pol <- st_buffer(bb_pol, buf_size)
-        
-        ny = ceiling((bb[4] - bb[2]) / cellsize)
+
+        ny = ceiling((bb[4] - bb[2]) / cellsize[i])
         xc <- c(bb[3], bb[1])
-        yc <- bb[2] + (0:ny) * cellsize
+        yc <- bb[2] + (0:ny) * cellsize[i]
         
-        g <- lapply(1:length(yc), function(i) {
-            m <- matrix(c(xc[1], yc[i], xc[2], yc[i]), ncol=2, byrow=TRUE)
-            st_sf(group = i, geometry = st_sfc(st_linestring(m)), crs= st_crs(x))
+        g <- lapply(1:length(yc), function(j) {
+            m <- matrix(c(xc[1], yc[j], xc[2], yc[j]), ncol=2, byrow=TRUE)
+            st_sf(group = j, geometry = st_sfc(st_linestring(m)), crs = st_crs(x))
         }) |> do.call(what = rbind)
 
         g <- st_rotate(g, angle)
         g <- st_extend_line(g, buf_size)
-        g <- st_intersection(g, x)
-    }) |> do.call(what = rbind)
+        g <- st_intersection(g, z)
+        st_geometry(st_combine(g))
+    }) |> do.call(what = c)
 }
 
 # examples
